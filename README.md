@@ -1,1 +1,1 @@
-# Data_Analytics_Projects
+This repository is for all the data analytics projects
