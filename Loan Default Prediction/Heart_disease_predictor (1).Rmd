@@ -1,0 +1,476 @@
+---
+title: "Heart Disease Prediction"
+author: "Karthik Badiganti"
+date: "07/23/2023"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Loading Packages
+``` {r libraries}
+
+library(kableExtra)
+library(ggplot2)
+library(tidyverse)
+library(readr)
+library(caret)
+library(gbm)
+library(corrplot)
+library(ggcorrplot)
+library(MASS)
+library(rpart)
+library(caret)
+library(naivebayes)
+library(class)
+library(randomForest)
+library(scales)
+library(cluster)
+library(plyr)
+library(ClustOfVar)
+library(dplyr)
+library(gridExtra)
+library(grid)
+library(lattice)
+library(rpart.plot)
+library(DataExplorer)
+library(adabag)
+library(e1071)
+library(tidyr)
+library(ClustOfVar)
+library(gbm)
+```
+
+# Importing Data
+
+```{r Loading Data}
+
+# loading data downloaded from kaggle
+heart_disease_data <-read.csv("heart.csv")
+
+
+
+colnames(heart_disease_data) <- c("Age", "Sex", "Chest_Pain_Type", 
+                          "Resting_Blood_Pressure", "Cholesterol", 
+                          "Fasting_Blood_Sugar", "Resting_ECG", 
+                          "Maximum_Heart_Rate", "Exercise_Angina", 
+                          "Old_peak", "Slope_HR", "No_MV", 
+                          "Thallium", "Heart_Disease_Indicator")
+head(heart_disease_data)
+```
+  
+# Checking Missing Values
+```{r checking NA values}
+colSums(is.na(heart_disease_data)) 
+```
+The Data is clean and can proceed to exploratory Data Analysis
+  
+# Transforming Variables
+Renaming Values based on the dataset reference to better understand the data  
+   
+```{r renaming}
+
+heart_disease_data <- heart_disease_data %>% filter(Thallium!=0)%>%
+  mutate(Resting_ECG = if_else(Resting_ECG == 0, "Normal",
+                            if_else(Resting_ECG == 1, 
+                                    "Wave abnormality", 
+                                    "Hypertrophy")),
+  Heart_Disease_Indicator = if_else(Heart_Disease_Indicator == 1, "No", "Yes"),
+  Exercise_Angina = if_else(Exercise_Angina == 1, 
+                                   "Yes" ,"No"), 
+  Sex = if_else(Sex == 1, "MALE", "FEMALE"),
+         Fasting_Blood_Sugar = if_else(Fasting_Blood_Sugar == 1, 
+                                    ">120",  "<=120"), 
+         
+  Chest_Pain_Type = if_else(Chest_Pain_Type == 1, "Atypical angina", 
+                              if_else(Chest_Pain_Type == 2, 
+                                      "Non-typical",
+                                      if_else(Chest_Pain_Type == 0,
+                                              "Asymptomatic",
+                                              "Typical Angina"))),
+  Slope_HR = if_else(Slope_HR == 2, "upsloping", 
+                         if_else(Slope_HR == 1, "flat","downsloping")),
+         
+         Thallium = case_when(
+           Thallium == 1 ~ "fixed defect",
+           Thallium == 2 ~ "normal",
+           Thallium == 3 ~ "reversible defect"
+         ),
+         No_MV = as.numeric(No_MV)) %>% 
+  mutate_if(is.character, as.factor)
+
+```
+
+# Dataset OverView
+
+```{r echo = FALSE}
+glimpse(heart_disease_data) 
+```
+  
+```{r}
+plot_bar(heart_disease_data)
+```
+
+
+
+# Exploratory Data Analysis
+
+## Density Plots with Heart Disease Indicator
+```{r densityplot}
+dp <- function(col,P){
+  ggplot(heart_disease_data, aes(x = col, fill = Heart_Disease_Indicator))+
+    geom_density(alpha = 0.5)+
+    theme(legend.position = "bottom")+
+    scale_fill_manual(values=c("lightgreen", "red", "#56B4E9"))+
+    scale_x_continuous(name = P)
+  
+}
+
+Age_dp <- dp(heart_disease_data$Age, "Age")
+
+bp_dp <- dp(heart_disease_data$Resting_Blood_Pressure, "Resting BP")
+
+old_peak_dp <- dp(heart_disease_data$Old_peak, "Old Peak")
+
+max_HR_dp <- dp(heart_disease_data$Maximum_Heart_Rate, "Maximum HR")
+
+cholesterol_dp <- dp(heart_disease_data$Cholesterol, "Cholesterol")
+
+MV_dp <- dp(heart_disease_data$No_MV, "No. Major Vessels")
+
+#using grid function to display them 
+grid.arrange(Age_dp, bp_dp, max_HR_dp, old_peak_dp, cholesterol_dp,MV_dp, ncol = 2, nrow = 3)
+
+```
+
+
+### Age vs HDI
+```{r Age vs HDI}
+heart_disease_data %>% ggplot(aes(Age, fill = Heart_Disease_Indicator))+
+  geom_bar() +scale_fill_manual(values = c("lightgreen", "lightblue"))
+```
+  
+   
+### Sex vs HDI
+
+```{r Sex vs HDI}
+heart_disease_data %>% ggplot(aes(Sex, fill = Heart_Disease_Indicator))+
+  geom_bar(width = 0.5)+
+  geom_label(stat = "Count",aes(label = ..count..),show.legend = FALSE, vjust = 1)+
+  scale_fill_manual(values =  c("lightgreen","lightblue"))
+```
+
+  
+
+### Chest pain type vs HDI
+ 
+
+```{r chest pain vs HDI}
+
+heart_disease_data %>% ggplot(aes(Chest_Pain_Type,fill = Heart_Disease_Indicator))+
+  geom_bar(width = 0.3)+
+  scale_fill_manual(values = c("lightgreen","lightblue"))
+```
+
+  
+### Cholestrol vs Age vs Sex
+
+```{r cholesterol vs age }
+
+heart_disease_data %>% ggplot(aes(Age,Cholesterol, color = Sex, size= Cholesterol))+
+  geom_point(shape = 20)+ scale_color_manual(values = c("blue","orange"))+
+  facet_grid(~Heart_Disease_Indicator)
+```
+
+  
+   
+### Age vs Heart Rate 
+
+```{r Age vs Heart Rate }
+heart_disease_data %>% ggplot(aes(Age, Maximum_Heart_Rate, color = Heart_Disease_Indicator)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "loess",size = 1)+
+  scale_color_manual(values = c("lightgreen","slateblue"))+ 
+  theme(panel.background = element_rect(fill = "white"),
+  panel.border = element_rect(colour = "gray", fill=NA, size=0.5))+
+  facet_grid(~Sex)
+```
+
+
+### Resting BP vs chest pain Type vs sex
+
+```{r bp vs cp}
+heart_disease_data %>% ggplot(aes(Sex,Resting_Blood_Pressure))+
+  geom_boxplot(color = "black", fill = "lightblue")+
+  labs(x = "Sex", y ="Blood pressure")+
+  facet_grid(~Chest_Pain_Type)
+```
+
+
+### Slope_HR vs HDI
+
+
+```{r Slope vs HDI}
+heart_disease_data %>% ggplot(aes(Slope_HR, fill=Heart_Disease_Indicator))+
+  geom_bar(width = 0.4) + scale_fill_manual(values = c("lightgreen","lightblue"))
+```
+
+### Thallium vs HDI
+
+```{r Thallium}
+heart_disease_data %>% ggplot(aes(Thallium, fill = Heart_Disease_Indicator))+
+  geom_bar(stat = "count", width = 0.4)+scale_fill_manual(values=c("lightgreen","lightblue"))
+
+```
+
+
+### Correlation plot
+
+
+```{r corr}
+# filtering columns that are factors and numbers
+col_heart <- round(cor(heart_disease_data[c(1,4,5,8,10,12)]),3)
+col_heart
+
+#correlation plot
+ggcorrplot(col_heart, hc.order = TRUE
+)
+```
+
+### PCA
+```{r pca }
+pca <- prcomp(heart_disease_data[c(1,4,5,8,10,12)])
+summary(pca) 
+data.frame(type = heart_disease_data$Heart_Disease_Indicator, pca$x[,1:6]) %>%
+  gather(key = "PC", value = "value", -type) %>%
+  ggplot(aes(PC, value, fill = type)) +
+  geom_boxplot()
+```
+
+
+
+# Data pre-processing
+
+## Feature Selection
+
+```{r Var imp}
+
+set.seed(1108)
+# feature selection using random forest
+var_imp_heart <- randomForest(Heart_Disease_Indicator~., data = heart_disease_data,
+                              importance = TRUE)
+varImpPlot(var_imp_heart)
+```
+
+
+## Splitting dataset 75% Train and 25% Test
+
+
+```{r datasplit}
+set.seed(1108)
+index <- createDataPartition(y = heart_disease_data$Heart_Disease_Indicator,
+                             p = 0.75, list = FALSE)
+H_test <- heart_disease_data[-index,]
+H_train <- heart_disease_data[index,]
+
+
+
+# removing 4 columns from train and test
+H_train<-subset(H_train,select = -c(Cholesterol,Fasting_Blood_Sugar,Resting_Blood_Pressure,Resting_ECG))
+H_test<-subset(H_test,select = -c(Cholesterol,Fasting_Blood_Sugar,Resting_Blood_Pressure,Resting_ECG))
+```
+
+```{r }
+# setting control parameter for 10 fold cross validation
+ctrl <- trainControl(method="cv", number=10)
+```
+
+
+## Models
+
+### Logistic Regression
+
+```{r logistic}
+set.seed(0811)
+glm_train <- train(Heart_Disease_Indicator ~.,
+                  data = H_train,
+                  method = "glm",
+                  trControl = ctrl)
+glm_predict <- predict(glm_train, H_test)
+
+#Confusion Matrix
+glm_CM <- confusionMatrix(glm_predict,H_test$Heart_Disease_Indicator, positive = "Yes")
+```
+
+
+```{r glm cm}
+accuracy_glm <- glm_CM$overall["Accuracy"]
+sensitivity_glm <- glm_CM$byClass["Sensitivity"]
+specificity_glm <- glm_CM$byClass["Specificity"]
+accuracy_results <- data_frame(Method = "Logistic Regression", Accuracy = accuracy_glm)
+accuracy_results
+
+```
+
+Accuracy of `r accuracy_glm` which is a great start. Let's look into other models.
+  
+  
+### KNN
+
+
+```{r knn}
+set.seed(0811)
+                   
+knn<- train(Heart_Disease_Indicator ~.,
+                  data = H_train,
+                  method = "knn",
+                  trControl = ctrl,
+                  tuneGrid = data.frame(k = seq(2, 30, 2)))
+
+knn$bestTune #best tune 
+
+knn_predict <- predict(knn, H_test)
+ggplot(knn,highlight = TRUE)
+
+```
+
+
+```{r CM knn}
+
+#confusion MAtrix of Knn
+knn_CM <- confusionMatrix(knn_predict,H_test$Heart_Disease_Indicator, positive = "Yes")
+specificity_knn <- knn_CM$byClass["Specificity"]
+accuracy_knn <- knn_CM$overall["Accuracy"]
+sensitivity_knn <- knn_CM$byClass["Sensitivity"]
+accuracy_results <- bind_rows(accuracy_results,
+                              data_frame(Method = "KNN", Accuracy = accuracy_knn))
+
+accuracy_results
+```
+
+### Decision tree
+
+
+```{r rpart}
+set.seed(0811)
+rpart <- train(Heart_Disease_Indicator ~.,
+                  data = H_train,
+                  method = "rpart")
+
+rpart_predict <- predict(rpart, H_test)
+```
+
+
+```{r rpart CM}
+
+rpart_CM <- confusionMatrix(rpart_predict,H_test$Heart_Disease_Indicator, positive = "Yes")
+
+sensitivity_rpart <- rpart_CM$byClass["Sensitivity"]
+specificity_rpart <- rpart_CM$byClass["Specificity"]
+accuracy_rpart <- rpart_CM$overall["Accuracy"]
+pos_pred_rpart<- rpart_CM$byClass["Pos Pred Value"]
+neg_pred_rpart <- rpart_CM$byClass["Neg Pred Value"]
+accuracy_results <- bind_rows(accuracy_results,
+                              data_frame(Method = "Decision Trees", Accuracy = accuracy_rpart))
+accuracy_results 
+```
+
+
+### Random forest model
+
+
+```{r randomforest}
+set.seed(0811)
+rf <- train(Heart_Disease_Indicator ~.,
+                  data = H_train,
+                     method = "rf",
+                  importance = TRUE)
+rf$bestTune  
+
+rf_predict <- predict(rf, H_test)
+
+# plotting variable importance
+plot(varImp(rf))
+```
+
+
+```{r rf CM}
+rf_CM <- confusionMatrix(rf_predict,H_test$Heart_Disease_Indicator, positive = "Yes")
+sensitivity_rf <- rf_CM$byClass["Sensitivity"]
+specificity_rf <- rf_CM$byClass["Specificity"]
+accuracy_rf <- rf_CM$overall["Accuracy"]
+accuracy_results <- bind_rows(accuracy_results,
+                              data_frame(Method = "Random Forest", Accuracy = accuracy_rf))
+
+accuracy_results
+```
+
+### Adaptive boosting
+
+```{r adaboost}
+#adaptive boosting
+set.seed(0811)
+
+ada <- boosting(Heart_Disease_Indicator ~.,
+                   data = H_train,mfinal = 70)
+ada_predict <- predict(ada, H_test)
+```
+
+
+```{r ada CM}
+
+#confusion matrix for ada boost model
+ada_CM <- confusionMatrix(as.factor(ada_predict$class),as.factor(H_test$Heart_Disease_Indicator), positive = "Yes")
+sensitivity_ada <- ada_CM$byClass["Sensitivity"]
+specificity_ada <- ada_CM$byClass["Specificity"]
+accuracy_ada <- ada_CM$overall["Accuracy"]
+accuracy_results <- bind_rows(accuracy_results,
+                              data_frame(Method = "Ada Boost", Accuracy = accuracy_ada))
+accuracy_results
+```
+
+
+
+# Results
+
+```{r cmlist, echo = FALSE}
+#list of confusion matrix
+Confusion_Matrix <- list(
+  Logistic_Regression =glm_CM,
+  KNN = knn_CM,
+  Regression_Trees = rpart_CM,
+  Random_Forest= rf_CM,
+  Ada_boost = ada_CM)
+     
+CM_Table <- sapply(Confusion_Matrix, function(x) x$byClass)
+CM_Table
+```
+
+  
+   
+# Conclusion
+
+The objective of this project is to use the Cleveland heart disease data set to correctly diagnose people with heart diseases. An explanatory data analysis was done and it revealed how different variables in the dataset help us predict the disease. It also revealed how some factors don't directly influence the results and those factors were later removed to improve our model.
+
+Different machine learning models were built to optimize the accuracy of the prediction and the ones that proved most successful were Logistic Regression model and the Random forest model. The least successful one is the KNN model. Although our accuracy was on an acceptable level, our sensitivity and specificity were still below 90% which is concerning. But with the given set of data this is an efficient outcome.
+
+Many other models were trained but they dint quite improve on the accuracy and hence weren't included in the report. Having more volume of data will enable an improvement in the model with much higher sample set. Also, using feature selection might also improve in a much accurate model.
+
+
+# References
+
+https://www.heartandstroke.ca/heart-disease/what-is-heart-disease/types-of-heart-disease
+
+https://archive.ics.uci.edu/ml/datasets/heart+disease
+
+https://uc-r.github.io/regression_trees
+
+https://towardsdatascience.com/random-forest-in-r-f66adf80ec9
+http://finzi.psych.upenn.edu/R/library/caret/html/sensitivity.html
+
+https://rafalab.github.io/dsbook/machine-learning-in-practice.html
